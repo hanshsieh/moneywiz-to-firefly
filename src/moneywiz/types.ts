@@ -4,6 +4,11 @@ export interface GetTransactionsOpts {
   limit?: number;
 }
 
+export interface GetAccountsOpts {
+  offset?: number;
+  limit?: number;
+}
+
 export enum TransactionType {
   TRANSFER_WITHDRAW = 'TransferWithdrawTransaction',
   TRANSFER_DEPOSIT = 'TransferDepositTransaction',
@@ -55,6 +60,7 @@ export interface Account {
   type: AccountType;
   openingBalance: Big;
   currency: string;
+  includeInNetworth: boolean;
 }
 
 export interface Tag {

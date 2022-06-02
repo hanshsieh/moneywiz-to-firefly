@@ -1,30 +1,51 @@
 import createKnex, { Knex } from 'knex';
-import { Transaction, GetTransactionsOpts, TransactionType, TransferWithdrawTransaction, TransferDepositTransaction, AccountType, Account } from "./types";
+import { 
+  Transaction, 
+  GetTransactionsOpts, 
+  TransactionType, 
+  TransferWithdrawTransaction, 
+  TransferDepositTransaction, 
+  AccountType, 
+  Account, 
+  GetAccountsOpts
+} from "./types";
 import Big from 'big.js';
 import * as model from './model';
 
+export interface Options {
+  dbPath: string;
+}
+
 export class MoneyWizDbClient {
   private knex: Knex;
-  constructor() {
+  constructor(options: Options) {
     this.knex = createKnex({
       client: 'sqlite3',
       useNullAsDefault: true,
       connection: {
-        filename: 'moneywiz_db_20220601.db',
+        filename: options.dbPath,
       },
     });
   }
   async close(): Promise<void> {
     await this.knex.destroy();
   }
-  async getAccounts(): Promise<Account[]>{
-    const rawAccounts = await model.Account.query(this.knex)
+  async getAccounts(options: GetAccountsOpts): Promise<Account[]>{
+    const queryBuilder = model.Account.query(this.knex);
+    if (options.offset) {
+      queryBuilder.offset(options.offset);
+    }
+    if (options.limit) {
+      queryBuilder.limit(options.limit);
+    }
+    const rawAccounts = await queryBuilder
       .select([
         model.AccountCol.ID,
         model.AccountCol.ACCOUNT_TYPE,
         model.AccountCol.NAME,
         model.AccountCol.OPENING_BALANCE,
         model.AccountCol.CURRENCY_NAME,
+        model.AccountCol.INCLUDE_IN_NETWORTH,
       ]);
     return rawAccounts.map((rawAccount) => this.mapAccount(rawAccount));
   }
@@ -121,26 +142,7 @@ export class MoneyWizDbClient {
       type: record[model.AccountCol.ACCOUNT_TYPE] as AccountType,
       openingBalance: new Big(record[model.AccountCol.OPENING_BALANCE]),
       currency: record[model.AccountCol.CURRENCY_NAME],
+      includeInNetworth: record[model.AccountCol.INCLUDE_IN_NETWORTH],
     };
   }
 }
-
-async function main() {
-  const source = new MoneyWizDbClient();
-  const trans = await source.getTransactions({
-    limit: 1000,
-  });
-  for (const tran of trans) {
-    if (tran.payee) {
-      console.info('tran: ', tran);
-    }
-  }
-  const accounts = await source.getAccounts();
-  for (const account of accounts) {
-    console.info(account);[]
-  }
-  await source.close();
-}
-main().catch((err) => {
-  console.error(err);
-});
