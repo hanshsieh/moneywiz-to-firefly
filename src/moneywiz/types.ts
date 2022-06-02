@@ -54,6 +54,7 @@ export interface Account {
   name: string;
   type: AccountType;
   openingBalance: Big;
+  currency: string;
 }
 
 export interface Tag {

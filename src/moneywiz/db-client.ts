@@ -17,6 +17,17 @@ export class MoneyWizDbClient {
   async close(): Promise<void> {
     await this.knex.destroy();
   }
+  async getAccounts(): Promise<Account[]>{
+    const rawAccounts = await model.Account.query(this.knex)
+      .select([
+        model.AccountCol.ID,
+        model.AccountCol.ACCOUNT_TYPE,
+        model.AccountCol.NAME,
+        model.AccountCol.OPENING_BALANCE,
+        model.AccountCol.CURRENCY_NAME,
+      ]);
+    return rawAccounts.map((rawAccount) => this.mapAccount(rawAccount));
+  }
   async getTransactions(options: GetTransactionsOpts): Promise<Transaction[]> {
     const queryBuilder = model.Transaction.query(this.knex)
       .select([
@@ -57,9 +68,10 @@ export class MoneyWizDbClient {
             `${model.Account.tableName}.${model.AccountCol.ID}`, 
             `${model.Account.tableName}.${model.AccountCol.NAME}`,
             `${model.Account.tableName}.${model.AccountCol.ACCOUNT_TYPE}`,
-            `${model.Account.tableName}.${model.AccountCol.OPENING_BALANCE}`);
+            `${model.Account.tableName}.${model.AccountCol.OPENING_BALANCE}`,
+            `${model.Account.tableName}.${model.AccountCol.CURRENCY_NAME}`);
         },
-      });;
+      });
     if (options.offset) {
       queryBuilder.offset(options.offset);
     }
@@ -108,6 +120,7 @@ export class MoneyWizDbClient {
       name: record[model.AccountCol.NAME],
       type: record[model.AccountCol.ACCOUNT_TYPE] as AccountType,
       openingBalance: new Big(record[model.AccountCol.OPENING_BALANCE]),
+      currency: record[model.AccountCol.CURRENCY_NAME],
     };
   }
 }
@@ -115,12 +128,16 @@ export class MoneyWizDbClient {
 async function main() {
   const source = new MoneyWizDbClient();
   const trans = await source.getTransactions({
-    limit: 10000,
+    limit: 1000,
   });
   for (const tran of trans) {
     if (tran.payee) {
       console.info('tran: ', tran);
     }
+  }
+  const accounts = await source.getAccounts();
+  for (const account of accounts) {
+    console.info(account);[]
   }
   await source.close();
 }
