@@ -234,3 +234,4 @@ export * from './webhook-store';
 export * from './webhook-trigger';
 export * from './webhook-update';
 export * from './account-filter';
+export * from './category-filter';

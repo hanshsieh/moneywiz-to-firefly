@@ -9,6 +9,11 @@ export interface GetAccountsOpts {
   limit?: number;
 }
 
+export interface GetCategoriessOpts {
+  offset?: number;
+  limit?: number;
+}
+
 export enum TransactionType {
   TRANSFER_WITHDRAW = 'TransferWithdrawTransaction',
   TRANSFER_DEPOSIT = 'TransferDepositTransaction',
@@ -28,10 +33,6 @@ export interface Transaction {
   amount: Big;
   recipientAmount?: Big;
   senderAmount?: Big;
-  originalRecipientCurrency?: string;
-  originalRecipientAmount?: Big;
-  originalSenderCurrency?: string;
-  originalSenderAmount?: Big;
   description: string;
   tags: Tag[];
   payee?: Payee;

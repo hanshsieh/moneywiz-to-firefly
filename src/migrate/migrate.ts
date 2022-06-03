@@ -3,9 +3,13 @@ import config, { IConfig } from 'config';
 import ow from 'ow';
 import { FireflyClient } from '../firefly';
 import { MoneyWizDbClient } from '../moneywiz';
-import { AccountRoleProperty, Account, CreditCardType, ShortAccountTypeProperty, TransactionTypeProperty, AccountRead } from '../firefly/model';
+import {
+  AccountRoleProperty, 
+  CreditCardType, 
+  ShortAccountTypeProperty, 
+  TransactionTypeProperty, AccountRead 
+} from '../firefly/model';
 import * as moneywiz from '../moneywiz/types';
-import Big, { Comparison } from 'big.js';
 
 interface AccountTypeOptions {
   accountRole: AccountRoleProperty;
@@ -74,6 +78,7 @@ class Migrate {
     }
   }
   private async deleteAllAccounts() {
+    console.info('Deleting all accounts');
     while (true) {
       const accounts = await this.fireflyClient.listAccount({
         page: 1,
@@ -86,11 +91,50 @@ class Migrate {
       }
     }
   }
+  private async deleteAllCategories() {
+    console.info('Deleting all categories');
+    while (true) {
+      const categories = await this.fireflyClient.listCategory({
+        page: 1,
+      });
+      if (categories.data.length === 0) {
+        break;
+      }
+      for (const category of categories.data) {
+        await this.fireflyClient.deleteCategory(category.id);
+      }
+    }
+  }
+  private async migrateCategories(): Promise<void> {
+    const categoryNames = new Set<String>();
+    for (let offset = 0;;) {
+      const categories = await this.moneywizClient.getCategories({
+        offset,
+      });
+      if (categories.length === 0) {
+        break;
+      }
+      for (const category of categories) {
+        const categoryName = this.toCategoryName(category);
+        // Moneywiz distinguish the category between expense and income, so it's possible
+        // that there're duplicate categories.
+        if (categoryNames.has(categoryName)) {
+          continue;
+        }
+        categoryNames.add(categoryName);
+        await this.fireflyClient.storeCategory({
+          name: categoryName,
+        });
+      }
+      offset += categories.length;
+    }
+  }
   async run(): Promise<void> {
-    //await this.deleteAllAccounts();
-    //return;
     await this.collectMoneywizAccounts();
     await this.collectCurrencyCodes();
+    await this.deleteAllAccounts();
+    await this.deleteAllCategories();
+    await this.migrateCategories();
     await this.migrateAccounts();
     await this.collectFireflyAccounts();
     await this.migrateTransactions();
@@ -242,22 +286,22 @@ class Migrate {
       if (categoryAssign.amount.eq(0)) {
         continue;
       }
-      let categoryName = categoryAssign.category.name;
-      let ancestor = categoryAssign.category.parent;
-      while (ancestor) {
-        categoryName = `${ancestor.name} > ${categoryName}`;
-        ancestor = ancestor.parent;
-      }
-      const parent = categoryAssign.category.parent;
-      if (parent) {
-        categoryName = `${parent.name} > ${categoryName}`;
-      }
+      const categoryName = this.toCategoryName(categoryAssign.category);
       result.push({
         amount: categoryAssign.amount.abs().toFixed(),
-        categoryName: `${categoryAssign.category.name}`,
+        categoryName,
       });
     }
     return result;
+  }
+  private toCategoryName(category: moneywiz.Category): string {
+    let categoryName = category.name;
+    let ancestor = category.parent;
+    while (ancestor) {
+      categoryName = `${ancestor.name} > ${categoryName}`;
+      ancestor = ancestor.parent;
+    }
+    return categoryName;
   }
   private async migrateTransaction(transaction: moneywiz.Transaction): Promise<void> {
     console.info('Migrating transaction %s', transaction.id);
@@ -297,7 +341,6 @@ class Migrate {
     }
   }
   private async migrateAccounts(): Promise<void> {
-    await this.deleteAllAccounts();
     const accountNames = await this.collectAccountNames();
     await this.collectCurrencyCodes();
     for (const account of this.moneywizAccounts) {
