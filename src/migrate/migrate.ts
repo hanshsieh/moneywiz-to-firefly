@@ -13,6 +13,7 @@ interface AccountTypeOptions {
   monthlyPaymentDate?: string;
 }
 interface TransactionInfo {
+  desc: string;
   transType: TransactionTypeProperty;
   foreignAmount?: string;
   foreignCurrencyCode?: string;
@@ -215,6 +216,8 @@ class Migrate {
         throw new Error(`Unknown transaction type "${transaction.type}"`);
     }
     return {
+      // Firefly doesn't allow an empty description
+      desc: transaction.desc ? transaction.desc : '(empty)',
       transType,
       foreignAmount,
       foreignCurrencyCode,
@@ -235,6 +238,10 @@ class Migrate {
       ];
     }
     for (const categoryAssign of transaction.categories) {
+      // Firefly doesn't allow a transaction split with amount <= 0
+      if (categoryAssign.amount.eq(0)) {
+        continue;
+      }
       let categoryName = categoryAssign.category.name;
       let ancestor = categoryAssign.category.parent;
       while (ancestor) {
@@ -264,7 +271,7 @@ class Migrate {
         //errorIfDuplicateHash: true,
         applyRules: true,
         fireWebhooks: true,
-        groupTitle: transaction.desc,
+        groupTitle: transInfo.desc,
         transactions: splitInfos.map((s) => {
           return {
             type: transInfo.transType,
@@ -276,7 +283,7 @@ class Migrate {
             sourceName: transInfo.sourceName,
             destinationId: transInfo.destinationId,
             destinationName: transInfo.destinationName,
-            description: transaction.desc,
+            description: transInfo.desc,
             notes: transaction.notes,
             tags: transaction.tags.map((t) => t.name),
             categoryName: s.categoryName,
