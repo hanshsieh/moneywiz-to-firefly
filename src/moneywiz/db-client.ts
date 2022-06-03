@@ -11,6 +11,7 @@ import {
 } from "./types";
 import Big from 'big.js';
 import * as model from './model';
+import Objection from 'objection';
 
 export interface Options {
   dbPath: string;
@@ -22,7 +23,7 @@ export class MoneyWizDbClient {
     this.knex = createKnex({
       client: 'sqlite3',
       useNullAsDefault: true,
-      //debug: true,
+      debug: true,
       connection: {
         filename: options.dbPath,
       },
@@ -79,6 +80,12 @@ export class MoneyWizDbClient {
       ]);
     return rawAccounts.map((rawAccount) => this.mapAccount(rawAccount));
   }
+  private selectForAccountGroup(builder: Objection.AnyQueryBuilder) {
+    builder.select([
+      `${model.AccountGroup.tableName}.${model.AccountGroupCol.ID}`,
+      `${model.AccountGroup.tableName}.${model.AccountGroupCol.NAME}`,
+    ]);
+  }
   async getTransactions(options: GetTransactionsOpts): Promise<Transaction[]> {
     const transactionCols = [
       model.TransactionCol.ID,
@@ -92,6 +99,9 @@ export class MoneyWizDbClient {
     const opposingTranCols = [
       model.TransactionCol.AMOUNT,
     ];
+    const accountGraph = {
+      $modify: 'selectForAccount',
+    };
     const queryBuilder = model.Transaction.query(this.knex)
       .select(transactionCols)
       .withGraphFetched({
@@ -101,15 +111,9 @@ export class MoneyWizDbClient {
         [model.TransactionRel.PAYEE_INFO]: {
           $modify: 'selectForPayee',
         },
-        [model.TransactionRel.ACCOUNT_INFO]: {
-          $modify: 'selectForAccount',
-        },
-        [model.TransactionRel.RECIPIENT_INFO]: {
-          $modify: 'selectForAccount',
-        },
-        [model.TransactionRel.SENDER_INFO]: {
-          $modify: 'selectForAccount',
-        },
+        [model.TransactionRel.ACCOUNT_INFO]: accountGraph,
+        [model.TransactionRel.RECIPIENT_INFO]: accountGraph,
+        [model.TransactionRel.SENDER_INFO]: accountGraph,
         [model.TransactionRel.RECIPIENT_TRANSACTION_INFO]: {
           $modify: 'selectForTransaction',
         },
@@ -144,6 +148,7 @@ export class MoneyWizDbClient {
             `${model.Account.tableName}.${model.AccountCol.OPENING_BALANCE}`,
             `${model.Account.tableName}.${model.AccountCol.CURRENCY_NAME}`);
         },
+        [this.selectForAccountGroup.name]: this.selectForAccountGroup,
         selectForCategory(builder) {
           builder.select(
             `${model.Category.tableName}.${model.CategoryCol.ID}`,

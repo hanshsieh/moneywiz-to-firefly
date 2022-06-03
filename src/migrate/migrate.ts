@@ -48,21 +48,6 @@ class Migrate {
       dbPath: moneywizConf.get('dbPath'),
     });
   }
-  private async collectAccountNames(): Promise<Set<string>> {
-    const accountNames = new Set<string>();
-    for (let page = 1; ; page++) {
-      const accounts = await this.fireflyClient.listAccount({
-        page,
-      });
-      if (accounts.data.length === 0) {
-        break;
-      }
-      for (const account of accounts.data) {
-        accountNames.add(account.attributes.name);
-      }
-    }
-    return accountNames;
-  }
   private async collectCurrencyCodes(): Promise<void> {
     this.moneywizCurrencies.clear();
     for (let page = 1; ; page++) {
@@ -87,6 +72,7 @@ class Migrate {
         break;
       }
       for (const account of accounts.data) {
+        console.info('Deleting account "%s"', account.attributes.name);
         await this.fireflyClient.deleteAccount(account.id);
       }
     }
@@ -211,11 +197,11 @@ class Migrate {
       case moneywiz.TransactionType.REFUND:
         transType = TransactionTypeProperty.Deposit;
         sourceName = transaction.payee?.name
-        destinationName = transaction.account.name;
+        destinationName = this.toAccountName(transaction.account);
         break;
       case moneywiz.TransactionType.WITHDRAW:
         transType = TransactionTypeProperty.Withdrawal;
-        sourceName = transaction.account.name
+        sourceName = this.toAccountName(transaction.account),
         destinationName = transaction.payee?.name;
         break;
       case moneywiz.TransactionType.TRANSFER_WITHDRAW:
@@ -226,8 +212,8 @@ class Migrate {
         }));
         foreignAmount = transaction.recipientAmount.abs().toFixed();
         foreignCurrencyCode = transaction.recipientAccount.currency;
-        sourceName = transaction.account.name;
-        destinationName = transaction.recipientAccount.name;
+        sourceName = this.toAccountName(transaction.account);
+        destinationName = this.toAccountName(transaction.recipientAccount);
         break;
       case moneywiz.TransactionType.RECONCILE:
         return undefined;
@@ -340,14 +326,16 @@ class Migrate {
       throw err;
     }
   }
+  private toAccountName(account: moneywiz.Account): string {
+    let accountName = account.name;
+    if (account.group) {
+      accountName = `${account.group.name} > ${accountName}`;
+    }
+    return accountName;
+  }
   private async migrateAccounts(): Promise<void> {
-    const accountNames = await this.collectAccountNames();
     await this.collectCurrencyCodes();
     for (const account of this.moneywizAccounts) {
-      if (accountNames.has(account.name)) {
-        console.info(`Account with name "${account.name}" already exists. Skipping it.`);
-        continue;
-      }
       if (!this.moneywizCurrencies.has(account.currency)) {
         console.info(`Currency ${account.currency} doesn't exist. Creating it`);
         await this.fireflyClient.storeCurrency({
@@ -358,10 +346,11 @@ class Migrate {
         });
         this.moneywizCurrencies.add(account.currency);
       }
-      console.info('Creating account "%s"', account.name);
+      const accountName = this.toAccountName(account);
+      console.info('Creating account "%s"', accountName);
       const accountTypeOptions = this.toAccountTypeOptions(account.type);
       await this.fireflyClient.storeAccount({
-        name: account.name,
+        name: accountName,
         currencyCode: account.currency,
         type: ShortAccountTypeProperty.Asset,
         accountRole: accountTypeOptions.accountRole,
