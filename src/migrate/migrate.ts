@@ -30,7 +30,7 @@ interface SplitInfo {
   amount: string;
   categoryName?: string;
 }
-
+const EMPTY = '(empty)';
 class Migrate {
   private moneywizClient: MoneyWizDbClient;
   private fireflyClient: FireflyClient;
@@ -196,13 +196,13 @@ class Migrate {
       case moneywiz.TransactionType.DEPOSIT:
       case moneywiz.TransactionType.REFUND:
         transType = TransactionTypeProperty.Deposit;
-        sourceName = transaction.payee?.name
+        sourceName = this.toNonEmptyStr(transaction.payee?.name);
         destinationName = this.toAccountName(transaction.account);
         break;
       case moneywiz.TransactionType.WITHDRAW:
         transType = TransactionTypeProperty.Withdrawal;
         sourceName = this.toAccountName(transaction.account),
-        destinationName = transaction.payee?.name;
+        destinationName = this.toNonEmptyStr(transaction.payee?.name);
         break;
       case moneywiz.TransactionType.TRANSFER_WITHDRAW:
         transType = TransactionTypeProperty.Transfer;
@@ -247,7 +247,7 @@ class Migrate {
     }
     return {
       // Firefly doesn't allow an empty description
-      desc: transaction.desc ? transaction.desc : '(empty)',
+      desc: this.toNonEmptyStr(transaction.desc),
       transType,
       foreignAmount,
       foreignCurrencyCode,
@@ -256,6 +256,12 @@ class Migrate {
       destinationId,
       destinationName,
     };
+  }
+  private toNonEmptyStr(str: string | undefined): string {
+    if (str) {
+      return str;
+    }
+    return EMPTY;
   }
   private toSplitInfo(transaction: moneywiz.Transaction): SplitInfo[] {
     const result: SplitInfo[] = [];

@@ -12,20 +12,18 @@ import {
 import Big from 'big.js';
 import * as model from './model';
 import Objection from 'objection';
-import { AccountGroup } from './model';
 
 export interface Options {
   dbPath: string;
 }
 const ACCOUNT_GROUP_NAME = 'account_group_name';
 export class MoneyWizDbClient {
-  
   private knex: Knex;
   constructor(options: Options) {
     this.knex = createKnex({
       client: 'sqlite3',
       useNullAsDefault: true,
-      debug: true,
+      //debug: true,
       connection: {
         filename: options.dbPath,
       },
@@ -71,26 +69,26 @@ export class MoneyWizDbClient {
     if (options.limit) {
       queryBuilder.limit(options.limit);
     }
-    const rawAccounts = await queryBuilder
-      .select([
-        `${model.Account.tableName}.${model.AccountCol.ID} AS ${model.AccountCol.ID}`,
-        `${model.Account.tableName}.${model.AccountCol.ACCOUNT_TYPE} AS ${model.AccountCol.ACCOUNT_TYPE}`,
-        `${model.Account.tableName}.${model.AccountCol.NAME} AS ${model.AccountCol.NAME}`,
-        `${model.Account.tableName}.${model.AccountCol.OPENING_BALANCE} AS ${model.AccountCol.OPENING_BALANCE}`,
-        `${model.Account.tableName}.${model.AccountCol.CURRENCY_NAME} AS ${model.AccountCol.CURRENCY_NAME}`,
-        `${model.Account.tableName}.${model.AccountCol.INCLUDE_IN_NETWORTH} AS ${model.AccountCol.INCLUDE_IN_NETWORTH}`,
-        `${model.AccountGroup.tableName}.${model.AccountGroupCol.NAME} AS ${ACCOUNT_GROUP_NAME}`,
-      ])
-      .leftOuterJoin(model.AccountGroup.tableName,
-        `${model.Account.tableName}.${model.AccountCol.GROUP_ID}`,
-        `${model.AccountGroup.tableName}.${model.AccountGroupCol.ID}`);
+    this.selectForAccount(queryBuilder);
+    const rawAccounts = await queryBuilder;
     return rawAccounts.map((rawAccount) => this.mapAccount(rawAccount));
   }
-  private selectForAccountGroup(builder: Objection.AnyQueryBuilder) {
+  private selectForAccount(builder: Objection.AnyQueryBuilder) {
+    // The "id" of "AccountGroup" table may be an integer that overflows 
+    // the "number" type in JavaScript. Therefore, you avoid selecting the
+    // the "id" directly, and directly use JOIN.
     builder.select([
-      `${model.AccountGroup.tableName}.${model.AccountGroupCol.ID}`,
-      `${model.AccountGroup.tableName}.${model.AccountGroupCol.NAME}`,
-    ]);
+      `${model.Account.tableName}.${model.AccountCol.ID}`,
+      `${model.Account.tableName}.${model.AccountCol.ACCOUNT_TYPE}`,
+      `${model.Account.tableName}.${model.AccountCol.NAME}`,
+      `${model.Account.tableName}.${model.AccountCol.OPENING_BALANCE}`,
+      `${model.Account.tableName}.${model.AccountCol.CURRENCY_NAME}`,
+      `${model.Account.tableName}.${model.AccountCol.INCLUDE_IN_NETWORTH}`,
+      `${model.AccountGroup.tableName}.${model.AccountGroupCol.NAME} AS ${ACCOUNT_GROUP_NAME}`,
+    ])
+    .leftOuterJoin(model.AccountGroup.tableName,
+      `${model.Account.tableName}.${model.AccountCol.GROUP_ID}`,
+      `${model.AccountGroup.tableName}.${model.AccountGroupCol.ID}`)
   }
   async getTransactions(options: GetTransactionsOpts): Promise<Transaction[]> {
     const transactionCols = [
@@ -106,7 +104,7 @@ export class MoneyWizDbClient {
       model.TransactionCol.AMOUNT,
     ];
     const accountGraph = {
-      $modify: 'selectForAccount',
+      $modify: this.selectForAccount.name,
     };
     const queryBuilder = model.Transaction.query(this.knex)
       .select(transactionCols)
@@ -146,15 +144,7 @@ export class MoneyWizDbClient {
             `${model.Payee.tableName}.${model.PayeeCol.ID}`,
             `${model.Payee.tableName}.${model.PayeeCol.NAME}`);
         },
-        selectForAccount(builder) {
-          builder.select(
-            `${model.Account.tableName}.${model.AccountCol.ID}`, 
-            `${model.Account.tableName}.${model.AccountCol.NAME}`,
-            `${model.Account.tableName}.${model.AccountCol.ACCOUNT_TYPE}`,
-            `${model.Account.tableName}.${model.AccountCol.OPENING_BALANCE}`,
-            `${model.Account.tableName}.${model.AccountCol.CURRENCY_NAME}`);
-        },
-        [this.selectForAccountGroup.name]: this.selectForAccountGroup,
+        [this.selectForAccount.name]: this.selectForAccount,
         selectForCategory(builder) {
           builder.select(
             `${model.Category.tableName}.${model.CategoryCol.ID}`,
