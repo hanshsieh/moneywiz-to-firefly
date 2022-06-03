@@ -112,7 +112,7 @@ export interface AccountStore {
      * @type {CreditCardType}
      * @memberof AccountStore
      */
-    creditCardType?: CreditCardType;
+    creditCardType?: CreditCardType | null;
     /**
      * Mandatory when the account_role is ccAsset. Moment at which CC payment installments are asked for by the bank.
      * @type {string}

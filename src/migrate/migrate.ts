@@ -2,7 +2,14 @@ import process from 'process';
 import { FireflyClient } from '../firefly';
 import { MoneyWizDbClient } from '../moneywiz';
 import config, { IConfig } from 'config';
-import { AccountRoleProperty, ShortAccountTypeProperty } from '../firefly/model';
+import { AccountRoleProperty, CreditCardType, ShortAccountTypeProperty } from '../firefly/model';
+import { AccountType } from '../moneywiz/types';
+
+interface AccountTypeOptions {
+  accountRole: AccountRoleProperty;
+  creditCardType?: CreditCardType;
+  monthlyPaymentDate?: string;
+}
 
 class Migrate {
   private moneywizClient: MoneyWizDbClient;
@@ -62,6 +69,7 @@ class Migrate {
     }
   }
   async run(): Promise<void> {
+    await this.deleteAllAccounts();
     const accounts = await this.moneywizClient.getAccounts({});
     const accountNames = await this.collectAccountNames();
     const currencyCodes = await this.collectCurrencyCodes();
@@ -81,14 +89,55 @@ class Migrate {
         currencyCodes.add(account.currency);
       }
       console.info('Creating account "%s"', account.name);
+      const accountTypeOptions = this.toAccountTypeOptions(account.type);
       await this.fireflyClient.storeAccount({
         name: account.name,
         currencyCode: account.currency,
         type: ShortAccountTypeProperty.Asset,
-        accountRole: AccountRoleProperty.DefaultAsset,
+        accountRole: accountTypeOptions.accountRole,
         includeNetWorth: account.includeInNetworth,
+        creditCardType: accountTypeOptions.creditCardType,
+        monthlyPaymentDate: accountTypeOptions.monthlyPaymentDate,
+        // There's a "opening balance" for Firefly,
+        // but the opening balance of Firefly requires a date, while
+        // the opening balance for MoneyWiz doesn't. The semantic of MoneyWiz's
+        // opening balance seems to be closer to the virtual balance of 
+        // Firefly.
+        virtualBalance: account.openingBalance.toFixed(),
       });
     }
+  }
+  private toAccountTypeOptions(accountType: AccountType): AccountTypeOptions {
+    const result: AccountTypeOptions = {
+      accountRole: AccountRoleProperty.Null,
+    };
+    switch (accountType) {
+      case AccountType.BANK_CHECK:
+        result.accountRole = AccountRoleProperty.DefaultAsset;
+        break;
+      case AccountType.BANK_SAVING:
+        result.accountRole = AccountRoleProperty.SavingAsset
+        break;
+      case AccountType.CASH:
+        result.accountRole = AccountRoleProperty.CashWalletAsset;
+        break;
+      case AccountType.CREDIT_CARD:
+        result.accountRole = AccountRoleProperty.CcAsset;
+        // The "creditCardType" can "monthlyPayment" cannot be set on the official web interface, but they
+        // are required when the "accountRole" is "ccAsset"
+        result.creditCardType = CreditCardType.MonthlyFull;
+        result.monthlyPaymentDate = '1970-01-01';
+        break;
+      case AccountType.FOREX:
+        result.accountRole = AccountRoleProperty.DefaultAsset;
+        break;
+      case AccountType.INVESTMENT:
+        result.accountRole = AccountRoleProperty.DefaultAsset;
+        break;
+      default:
+        throw new Error(`Unknown account type "${accountType}"`);
+    }
+    return result;
   }
   async close(): Promise<void> {
     await this.moneywizClient.close();
