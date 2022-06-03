@@ -14,35 +14,44 @@ export enum TransactionType {
   TRANSFER_DEPOSIT = 'TransferDepositTransaction',
   WITHDRAW = 'WithdrawTransaction',
   DEPOSIT = 'DepositTransaction',
-  RECONCILE = 'ReconcilTransaction',
+  RECONCILE = 'ReconcileTransaction',
+  REFUND = 'RefundTransaction',
+  INVESTMENT_BUY = 'InvestmentBuyTransaction',
+  INVESTMENT_SELL = 'InvestmentSellTransaction',
+  INVESTMENT_EXCHANGE = 'InvestmentExchangeTransaction',
 }
 
 export interface Transaction {
   id: number;
   type: TransactionType;
+  date: Date;
   amount: Big;
+  recipientAmount?: Big;
+  senderAmount?: Big;
+  originalRecipientCurrency?: string;
+  originalRecipientAmount?: Big;
+  originalSenderCurrency?: string;
+  originalSenderAmount?: Big;
   description: string;
   tags: Tag[];
   payee?: Payee;
   account: Account;
+  desc: string;
+  notes: string;
+  categories: CategoryAssign[],
+  recipientAccount?: Account;
+  senderAccount?: Account;
 }
 
-export interface TransferWithdrawTransaction extends Transaction {
-  type: TransactionType.TRANSFER_WITHDRAW;
-  recipientAccount: Account;
+export interface CategoryAssign {
+  amount: Big;
+  category: Category;
 }
 
-export interface TransferDepositTransaction extends Transaction {
-  type: TransactionType.TRANSFER_DEPOSIT;
-  senderAccount: Account;
-}
-
-export interface WithdrawTransaction extends Transaction {
-  type: TransactionType.WITHDRAW;
-}
-
-export interface DepositTransaction extends Transaction {
-  type: TransactionType.DEPOSIT;
+export interface Category {
+  id: number;
+  name: string;
+  parent?: Category;
 }
 
 export enum AccountType {

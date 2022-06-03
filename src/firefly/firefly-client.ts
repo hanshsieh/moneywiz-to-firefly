@@ -66,10 +66,12 @@ export class FireflyClient {
    */
   async storeAccount(options: AccountStore): Promise<AccountSingle> {
     try {
+      const body = snakecaseKeys(options, {
+        deep: true,
+      });
+      console.debug('Storing account: %s', JSON.stringify(body, null, 2));
       const rawResp: Record<string, unknown> = await this.httpClient.post('api/v1/accounts', {
-        json: snakecaseKeys(options, {
-          deep: true,
-        }),
+        json: body,
       }).json();
       const rawAccountData = rawResp.data;
       return <AccountSingle>camelcaseKeys(rawResp, {
@@ -86,10 +88,12 @@ export class FireflyClient {
    */
   async storeTransaction(options: TransactionStore): Promise<TransactionSingle> {
     try {
+      const body = snakecaseKeys(options, {
+        deep: true,
+      });
+      console.debug('Storing transaction: %s', JSON.stringify(body, null, 2));
       const rawResp: Record<string, unknown> = await this.httpClient.post('api/v1/transactions', {
-        json: snakecaseKeys(options, {
-          deep: true,
-        }),
+        json: body,
       }).json();
       return <TransactionSingle>camelcaseKeys(rawResp, {
         deep: true,

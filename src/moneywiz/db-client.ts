@@ -3,11 +3,10 @@ import {
   Transaction, 
   GetTransactionsOpts, 
   TransactionType, 
-  TransferWithdrawTransaction, 
-  TransferDepositTransaction, 
   AccountType, 
   Account, 
-  GetAccountsOpts
+  GetAccountsOpts,
+  Category
 } from "./types";
 import Big from 'big.js';
 import * as model from './model';
@@ -22,6 +21,7 @@ export class MoneyWizDbClient {
     this.knex = createKnex({
       client: 'sqlite3',
       useNullAsDefault: true,
+      //debug: true,
       connection: {
         filename: options.dbPath,
       },
@@ -50,13 +50,24 @@ export class MoneyWizDbClient {
     return rawAccounts.map((rawAccount) => this.mapAccount(rawAccount));
   }
   async getTransactions(options: GetTransactionsOpts): Promise<Transaction[]> {
+    const transactionCols = [
+      model.TransactionCol.ID,
+      model.TransactionCol.TRANSACTION_TYPE,
+      model.TransactionCol.DESC,
+      model.TransactionCol.AMOUNT,
+      model.TransactionCol.DATE,
+      model.TransactionCol.DESC,
+      model.TransactionCol.NOTES,
+      model.TransactionCol.ORIGINAL_SENDER_CURRENCY,
+      model.TransactionCol.ORIGINAL_SENDER_AMOUNT,
+      model.TransactionCol.ORIGINAL_RECIPIENT_CURRENCY,
+      model.TransactionCol.ORIGINAL_RECIPIENT_AMOUNT,
+    ];
+    const opposingTranCols = [
+      model.TransactionCol.AMOUNT,
+    ];
     const queryBuilder = model.Transaction.query(this.knex)
-      .select([
-        model.TransactionCol.ID,
-        model.TransactionCol.TRANSACTION_TYPE,
-        model.TransactionCol.DESC,
-        model.TransactionCol.AMOUNT,
-      ])
+      .select(transactionCols)
       .withGraphFetched({
         [model.TransactionRel.TAGS]: {
           $modify: 'selectForTags',
@@ -72,6 +83,21 @@ export class MoneyWizDbClient {
         },
         [model.TransactionRel.SENDER_INFO]: {
           $modify: 'selectForAccount',
+        },
+        [model.TransactionRel.RECIPIENT_TRANSACTION_INFO]: {
+          $modify: 'selectForTransaction',
+        },
+        [model.TransactionRel.SENDER_TRANSACTION_INFO]: {
+          $modify: 'selectForTransaction',
+        },
+        [model.TransactionRel.CATEGORY_ASSIGNS]: {
+          [model.CategoryAssignmentRel.CATEGORY_INFO]: {
+            $modify: 'selectForCategory',
+            [model.CategoryRel.PARENT_INFO]: {
+              $recursive: 10,
+              $modify: 'selectForCategory',
+            },
+          },
         },
       }).modifiers({
         selectForTags(builder) {
@@ -92,6 +118,15 @@ export class MoneyWizDbClient {
             `${model.Account.tableName}.${model.AccountCol.OPENING_BALANCE}`,
             `${model.Account.tableName}.${model.AccountCol.CURRENCY_NAME}`);
         },
+        selectForCategory(builder) {
+          builder.select(
+            `${model.Category.tableName}.${model.CategoryCol.ID}`,
+            `${model.Category.tableName}.${model.CategoryCol.NAME}`,
+          );
+        },
+        selectForTransaction(builder) {
+          builder.select(opposingTranCols);
+        },
       });
     if (options.offset) {
       queryBuilder.offset(options.offset);
@@ -105,12 +140,25 @@ export class MoneyWizDbClient {
       const account = rawTran[model.TransactionRel.ACCOUNT_INFO];
       const recipientAccount = rawTran[model.TransactionRel.RECIPIENT_INFO];
       const senderAccount = rawTran[model.TransactionRel.SENDER_INFO];
+      const senderCurrency = rawTran[model.TransactionCol.ORIGINAL_SENDER_CURRENCY];
+      const senderAmount = rawTran[model.TransactionCol.ORIGINAL_SENDER_AMOUNT];
+      const recipientCurrency = rawTran[model.TransactionCol.ORIGINAL_RECIPIENT_CURRENCY];
+      const recipientAmount = rawTran[model.TransactionCol.ORIGINAL_RECIPIENT_AMOUNT];
       const type = rawTran[model.TransactionCol.TRANSACTION_TYPE] as TransactionType;
+      const recipientTran = rawTran[model.TransactionRel.RECIPIENT_TRANSACTION_INFO];
+      const senderTran = rawTran[model.TransactionRel.SENDER_TRANSACTION_INFO];
       let result: Transaction = {
         id: rawTran[model.TransactionCol.ID],
         type: rawTran[model.TransactionCol.TRANSACTION_TYPE] as TransactionType,
+        date: new Date(rawTran[model.TransactionCol.DATE]),
         description: rawTran[model.TransactionCol.DESC] ?? '',
         amount: new Big(rawTran[model.TransactionCol.AMOUNT]),
+        recipientAmount: recipientTran ? new Big(recipientTran[model.TransactionCol.AMOUNT]) : undefined,
+        senderAmount: senderTran ? new Big(senderTran[model.TransactionCol.AMOUNT]) : undefined,
+        originalSenderCurrency: senderCurrency ?? undefined,
+        originalSenderAmount: senderAmount ? new Big(senderAmount) : undefined,
+        originalRecipientCurrency: recipientCurrency ?? undefined,
+        originalRecipientAmount: recipientAmount ? new Big(recipientAmount) : undefined,
         tags: rawTran[model.TransactionRel.TAGS].map((tag) => ({
           id: tag[model.TagCol.ID],
           name: tag[model.TagCol.NAME],
@@ -120,18 +168,36 @@ export class MoneyWizDbClient {
           name: payee[model.PayeeCol.NAME],
         } : undefined,
         account: this.mapAccount(account),
+        desc: rawTran[model.TransactionCol.DESC],
+        notes: rawTran[model.TransactionCol.NOTES],
+        categories: rawTran[model.TransactionRel.CATEGORY_ASSIGNS].map((c) => {
+          const category = c[model.CategoryAssignmentRel.CATEGORY_INFO];
+          const resultCat = {
+            amount: new Big(c[model.CategoryAssignmentCol.AMOUNT]),
+            category: {
+              id: category[model.CategoryCol.ID],
+              name: category[model.CategoryCol.NAME],
+            },
+          };
+          let nowCat: model.Category = category;
+          let nowResultCat: Category = resultCat.category;
+          while (nowCat) {
+            const parent = nowCat[model.CategoryRel.PARENT_INFO];
+            if (!parent) {
+              break;
+            }
+            nowResultCat.parent = {
+              id: parent[model.CategoryCol.ID],
+              name: parent[model.CategoryCol.NAME],
+            };
+            nowCat = parent;
+            nowResultCat = nowResultCat.parent;
+          }
+          return resultCat;
+        }),
+        recipientAccount: recipientAccount ? this.mapAccount(recipientAccount) : undefined,
+        senderAccount: senderAccount ? this.mapAccount(senderAccount) : undefined,
       };
-      if (type === TransactionType.TRANSFER_WITHDRAW) {
-        result = <TransferWithdrawTransaction>{
-          ...result,
-          recipientAccount: this.mapAccount(recipientAccount),
-        };
-      } else if (type === TransactionType.TRANSFER_DEPOSIT) {
-        result = <TransferDepositTransaction>{
-          ...result,
-          senderAccount: this.mapAccount(senderAccount),
-        };
-      }
       return result;
     });
   }

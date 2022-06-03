@@ -1,5 +1,6 @@
 import { Model } from 'objection';
 import { Account, AccountCol } from './account';
+import { CategoryAssignment, CategoryAssignmentCol } from './category-assignment';
 import { Payee, PayeeCol } from './payee';
 import { Tag, TagCol } from './tag';
 import { TagTransactionLink, TagTransactionLinkCol } from './tag-transaction-link';
@@ -15,7 +16,13 @@ export enum TransactionCol {
   ACCOUNT = 'account',
   RECIPIENT_ACCOUNT = 'recipientAccount',
   SENDER_ACCOUNT = 'senderAccount',
+  RECIPIENT_TRANSACTION = 'recipientTransaction',
+  SENDER_TRANSACTION = 'senderTransaction',
   PAYEE_ID = 'payee',
+  ORIGINAL_RECIPIENT_CURRENCY = 'originalRecipientCurrency',
+  ORIGINAL_RECIPIENT_AMOUNT = 'originalRecipientAmount',
+  ORIGINAL_SENDER_CURRENCY = 'originalSenderCurrency',
+  ORIGINAL_SENDER_AMOUNT = 'originalSenderAmount',
 }
 export enum TransactionRel {
   TAGS = 'tags',
@@ -23,6 +30,9 @@ export enum TransactionRel {
   ACCOUNT_INFO = 'accountInfo',
   RECIPIENT_INFO = 'recipientInfo',
   SENDER_INFO = 'senderInfo',
+  RECIPIENT_TRANSACTION_INFO = 'recipientTransactionInfo',
+  SENDER_TRANSACTION_INFO = 'senderTransactionInfo',
+  CATEGORY_ASSIGNS = 'categoryAssigns',
 }
 export class Transaction extends Model {
   [TransactionCol.ID]!: number;
@@ -66,11 +76,19 @@ export class Transaction extends Model {
    */
   [TransactionCol.SENDER_ACCOUNT]!: number;
   [TransactionCol.PAYEE_ID]!: number;
+  [TransactionCol.ORIGINAL_RECIPIENT_CURRENCY]!: string;
+  [TransactionCol.ORIGINAL_RECIPIENT_AMOUNT]!: number;
+  [TransactionCol.ORIGINAL_SENDER_CURRENCY]!: string;
+  [TransactionCol.ORIGINAL_SENDER_AMOUNT]!: number;
+
   [TransactionRel.TAGS]!: Tag[];
   [TransactionRel.PAYEE_INFO]!: Payee;
   [TransactionRel.ACCOUNT_INFO]!: Account;
   [TransactionRel.RECIPIENT_INFO]!: Account;
   [TransactionRel.SENDER_INFO]!: Account;
+  [TransactionRel.CATEGORY_ASSIGNS]!: CategoryAssignment[];
+  [TransactionRel.RECIPIENT_TRANSACTION_INFO]!: Transaction;
+  [TransactionRel.SENDER_TRANSACTION_INFO]!: Transaction;
 
   static get tableName(): string {
     return 'Transactions';
@@ -123,7 +141,31 @@ export class Transaction extends Model {
           from: `${Transaction.tableName}.${TransactionCol.SENDER_ACCOUNT}`,
           to: `${Account.tableName}.${AccountCol.ID}`,
         }
-      }
+      },
+      [TransactionRel.RECIPIENT_TRANSACTION_INFO]: {
+        relation: Model.HasOneRelation,
+        modelClass: Transaction,
+        join: {
+          from: `${Transaction.tableName}.${TransactionCol.RECIPIENT_TRANSACTION}`,
+          to: `${Transaction.tableName}.${TransactionCol.ID}`,
+        }
+      },
+      [TransactionRel.SENDER_TRANSACTION_INFO]: {
+        relation: Model.HasOneRelation,
+        modelClass: Transaction,
+        join: {
+          from: `${Transaction.tableName}.${TransactionCol.SENDER_TRANSACTION}`,
+          to: `${Transaction.tableName}.${TransactionCol.ID}`,
+        }
+      },
+      [TransactionRel.CATEGORY_ASSIGNS]: {
+        relation: Model.HasManyRelation,
+        modelClass: CategoryAssignment,
+        join: {
+          from: `${Transaction.tableName}.${TransactionCol.ID}`,
+          to: `${CategoryAssignment.tableName}.${CategoryAssignmentCol.TRANSACTION_ID}`,
+        }
+      },
     };
   }
 }

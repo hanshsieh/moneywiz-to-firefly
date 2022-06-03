@@ -1,19 +1,37 @@
 import process from 'process';
+import config, { IConfig } from 'config';
+import ow from 'ow';
 import { FireflyClient } from '../firefly';
 import { MoneyWizDbClient } from '../moneywiz';
-import config, { IConfig } from 'config';
-import { AccountRoleProperty, CreditCardType, ShortAccountTypeProperty } from '../firefly/model';
-import { AccountType } from '../moneywiz/types';
+import { AccountRoleProperty, Account, CreditCardType, ShortAccountTypeProperty, TransactionTypeProperty, AccountRead } from '../firefly/model';
+import * as moneywiz from '../moneywiz/types';
+import Big, { Comparison } from 'big.js';
 
 interface AccountTypeOptions {
   accountRole: AccountRoleProperty;
   creditCardType?: CreditCardType;
   monthlyPaymentDate?: string;
 }
+interface TransactionInfo {
+  transType: TransactionTypeProperty;
+  foreignAmount?: string;
+  foreignCurrencyCode?: string;
+  sourceId?: string;
+  sourceName?: string;
+  destinationId?: string;
+  destinationName?: string;
+}
+interface SplitInfo {
+  amount: string;
+  categoryName?: string;
+}
 
 class Migrate {
   private moneywizClient: MoneyWizDbClient;
   private fireflyClient: FireflyClient;
+  private readonly fireflyAccounts: AccountRead[] = [];
+  private readonly moneywizAccounts: moneywiz.Account[] = [];
+  private readonly moneywizCurrencies: Set<string> = new Set();
   constructor() {
     const fireflyConf = config.get<IConfig>('firefly');
     const moneywizConf = config.get<IConfig>('moneywiz');
@@ -40,8 +58,8 @@ class Migrate {
     }
     return accountNames;
   }
-  private async collectCurrencyCodes(): Promise<Set<string>> {
-    const codes = new Set<string>();
+  private async collectCurrencyCodes(): Promise<void> {
+    this.moneywizCurrencies.clear();
     for (let page = 1; ; page++) {
       const currencies = await this.fireflyClient.listCurrency({
         page,
@@ -50,10 +68,9 @@ class Migrate {
         break;
       }
       for (const currency of currencies.data) {
-        codes.add(currency.attributes.code);
+        this.moneywizCurrencies.add(currency.attributes.code);
       }
     }
-    return codes;
   }
   private async deleteAllAccounts() {
     while (true) {
@@ -69,16 +86,219 @@ class Migrate {
     }
   }
   async run(): Promise<void> {
+    //await this.deleteAllAccounts();
+    //return;
+    await this.collectMoneywizAccounts();
+    await this.collectCurrencyCodes();
+    await this.migrateAccounts();
+    await this.collectFireflyAccounts();
+    await this.migrateTransactions();
+  }
+  private async collectMoneywizAccounts() {
+    this.moneywizAccounts.length = 0;
+    for (let offset = 0;;) {
+      const accounts = await this.moneywizClient.getAccounts({
+        offset,
+        limit: 1000,
+      });
+      if (accounts.length === 0) {
+        break;
+      }
+      this.moneywizAccounts.push(...accounts);
+      offset += accounts.length;
+    }
+  }
+  private async collectFireflyAccounts() {
+    this.fireflyAccounts.length = 0;
+    for (let page = 1;; page++) {
+      const accounts = await this.fireflyClient.listAccount({
+        page,
+      });
+      if (accounts.data.length === 0) {
+        break;
+      }
+      this.fireflyAccounts.push(...accounts.data);
+    }
+  }
+  private findFireflyAccountByName(name: string): AccountRead | undefined {
+    for (const account of this.fireflyAccounts) {
+      if (account.attributes.name === name) {
+        return account;
+      }
+    }
+    return undefined;
+  }
+  private async migrateTransactions(): Promise<void> {
+    const pageSize = 1000;
+    for (let offset = 0;;) {
+      const transactions = await this.moneywizClient.getTransactions({
+        offset,
+        limit: pageSize,
+      });
+      if (transactions.length === 0) {
+        break;
+      }
+      for (const transaction of transactions) {
+        await this.migrateTransaction(transaction);
+      }
+      offset += transactions.length;
+    }
+  }
+  private toTransactionInfo(transaction: moneywiz.Transaction): TransactionInfo | undefined {
+    if (transaction.amount.eq(0)) {
+      console.warn('Ignoring transaction with amount 0. transactionId=%s', transaction.id);
+      return undefined;
+    }
+    if (!transaction.type) {
+      console.warn('Ignoring transaction with empty type. It can happen because of Moneywiz\'s bug. transactionId=%s',
+        transaction.id);
+      return undefined;
+    }
+    let transType: TransactionTypeProperty;
+    let foreignAmount: string | undefined;
+    let foreignCurrencyCode: string | undefined;
+    let sourceName: string | undefined;
+    let sourceId: string | undefined;
+    let destinationName: string | undefined;
+    let destinationId: string | undefined;
+    switch (transaction.type) {
+      case moneywiz.TransactionType.DEPOSIT:
+      case moneywiz.TransactionType.REFUND:
+        transType = TransactionTypeProperty.Deposit;
+        sourceName = transaction.payee?.name
+        destinationName = transaction.account.name;
+        break;
+      case moneywiz.TransactionType.WITHDRAW:
+        transType = TransactionTypeProperty.Withdrawal;
+        sourceName = transaction.account.name
+        destinationName = transaction.payee?.name;
+        break;
+      case moneywiz.TransactionType.TRANSFER_WITHDRAW:
+        transType = TransactionTypeProperty.Transfer;
+        ow(transaction, ow.object.partialShape({
+          recipientAmount: ow.object,
+          recipientAccount: ow.object,
+        }));
+        foreignAmount = transaction.recipientAmount.abs().toFixed();
+        foreignCurrencyCode = transaction.recipientAccount.currency;
+        sourceName = transaction.account.name;
+        destinationName = transaction.recipientAccount.name;
+        break;
+      case moneywiz.TransactionType.RECONCILE:
+        return undefined;
+        /*
+        transType = TransactionTypeProperty.Reconciliation;
+        const accountName = transaction.account.name;
+        const reconcileAccountName = this.toReconcileAccountName(accountName, transaction.account.currency);
+        const account = this.findFireflyAccountByName(accountName);
+        const reconcileAccount = this.findFireflyAccountByName(accountName);
+        if (!account || !reconcileAccount) {
+          throw new Error(`Failed to find account by name "${accountName}" and "${reconcileAccountName}"`);
+        }
+        // When creating a reconcilation transaction, we must use ID instead of name for the source
+        // and destination account.
+        if (transaction.amount.cmp(0) < 0) {
+          sourceId = account.id;
+          destinationId = reconcileAccount.id;
+        } else {
+          sourceId = reconcileAccount.id;
+          destinationId = account.id;
+        }
+        break;*/
+      case moneywiz.TransactionType.TRANSFER_DEPOSIT:
+      case moneywiz.TransactionType.INVESTMENT_BUY:
+      case moneywiz.TransactionType.INVESTMENT_SELL:
+      case moneywiz.TransactionType.INVESTMENT_EXCHANGE:
+        // We do no handle these transactions.
+        return undefined;
+      default:
+        throw new Error(`Unknown transaction type "${transaction.type}"`);
+    }
+    return {
+      transType,
+      foreignAmount,
+      foreignCurrencyCode,
+      sourceId,
+      sourceName,
+      destinationId,
+      destinationName,
+    };
+  }
+  private toSplitInfo(transaction: moneywiz.Transaction): SplitInfo[] {
+    const result: SplitInfo[] = [];
+    // Transfer and reconcilation transactions won't have a category.
+    if (transaction.categories.length === 0) {
+      return [
+        {
+          amount: transaction.amount.abs().toFixed(),
+        },
+      ];
+    }
+    for (const categoryAssign of transaction.categories) {
+      let categoryName = categoryAssign.category.name;
+      let ancestor = categoryAssign.category.parent;
+      while (ancestor) {
+        categoryName = `${ancestor.name} > ${categoryName}`;
+        ancestor = ancestor.parent;
+      }
+      const parent = categoryAssign.category.parent;
+      if (parent) {
+        categoryName = `${parent.name} > ${categoryName}`;
+      }
+      result.push({
+        amount: categoryAssign.amount.abs().toFixed(),
+        categoryName: `${categoryAssign.category.name}`,
+      });
+    }
+    return result;
+  }
+  private async migrateTransaction(transaction: moneywiz.Transaction): Promise<void> {
+    console.info('Migrating transaction %s', transaction.id);
+    const transInfo = this.toTransactionInfo(transaction);
+    if (!transInfo) {
+      return;
+    }
+    const splitInfos = this.toSplitInfo(transaction);
+    try {
+      await this.fireflyClient.storeTransaction({
+        //errorIfDuplicateHash: true,
+        applyRules: true,
+        fireWebhooks: true,
+        groupTitle: transaction.desc,
+        transactions: splitInfos.map((s) => {
+          return {
+            type: transInfo.transType,
+            date: transaction.date,
+            amount: s.amount,
+            foreignAmount: transInfo.foreignAmount,
+            foreignCurrencyCode: transInfo.foreignCurrencyCode,
+            sourceId: transInfo.sourceId,
+            sourceName: transInfo.sourceName,
+            destinationId: transInfo.destinationId,
+            destinationName: transInfo.destinationName,
+            description: transaction.desc,
+            notes: transaction.notes,
+            tags: transaction.tags.map((t) => t.name),
+            categoryName: s.categoryName,
+            internalReference: `${transaction.id}`,
+          };
+        }),
+      });
+    } catch (err) {
+      console.error('Failed to migrate transaction %s', transaction.id);
+      throw err;
+    }
+  }
+  private async migrateAccounts(): Promise<void> {
     await this.deleteAllAccounts();
-    const accounts = await this.moneywizClient.getAccounts({});
     const accountNames = await this.collectAccountNames();
-    const currencyCodes = await this.collectCurrencyCodes();
-    for (const account of accounts) {
+    await this.collectCurrencyCodes();
+    for (const account of this.moneywizAccounts) {
       if (accountNames.has(account.name)) {
         console.info(`Account with name "${account.name}" already exists. Skipping it.`);
         continue;
       }
-      if (!currencyCodes.has(account.currency)) {
+      if (!this.moneywizCurrencies.has(account.currency)) {
         console.info(`Currency ${account.currency} doesn't exist. Creating it`);
         await this.fireflyClient.storeCurrency({
           code: account.currency,
@@ -86,7 +306,7 @@ class Migrate {
           symbol: account.currency,
           decimalPlaces: 2,
         });
-        currencyCodes.add(account.currency);
+        this.moneywizCurrencies.add(account.currency);
       }
       console.info('Creating account "%s"', account.name);
       const accountTypeOptions = this.toAccountTypeOptions(account.type);
@@ -105,33 +325,43 @@ class Migrate {
         // Firefly.
         virtualBalance: account.openingBalance.toFixed(),
       });
+      // Create corresponding reconcilation account
+      /*await this.fireflyClient.storeAccount({
+        name: this.toReconcileAccountName(account.name, account.currency),
+        currencyCode: account.currency,
+        type: ShortAccountTypeProperty.Reconciliation,
+        includeNetWorth: false,
+      });*/
     }
   }
-  private toAccountTypeOptions(accountType: AccountType): AccountTypeOptions {
+  private toReconcileAccountName(name: string, currencyCode: string): string {
+    return `${name} reconciliation (${currencyCode})`;
+  }
+  private toAccountTypeOptions(accountType: moneywiz.AccountType): AccountTypeOptions {
     const result: AccountTypeOptions = {
       accountRole: AccountRoleProperty.Null,
     };
     switch (accountType) {
-      case AccountType.BANK_CHECK:
+      case moneywiz.AccountType.BANK_CHECK:
         result.accountRole = AccountRoleProperty.DefaultAsset;
         break;
-      case AccountType.BANK_SAVING:
+      case moneywiz.AccountType.BANK_SAVING:
         result.accountRole = AccountRoleProperty.SavingAsset
         break;
-      case AccountType.CASH:
+      case moneywiz.AccountType.CASH:
         result.accountRole = AccountRoleProperty.CashWalletAsset;
         break;
-      case AccountType.CREDIT_CARD:
+      case moneywiz.AccountType.CREDIT_CARD:
         result.accountRole = AccountRoleProperty.CcAsset;
         // The "creditCardType" can "monthlyPayment" cannot be set on the official web interface, but they
         // are required when the "accountRole" is "ccAsset"
         result.creditCardType = CreditCardType.MonthlyFull;
         result.monthlyPaymentDate = '1970-01-01';
         break;
-      case AccountType.FOREX:
+      case moneywiz.AccountType.FOREX:
         result.accountRole = AccountRoleProperty.DefaultAsset;
         break;
-      case AccountType.INVESTMENT:
+      case moneywiz.AccountType.INVESTMENT:
         result.accountRole = AccountRoleProperty.DefaultAsset;
         break;
       default:
