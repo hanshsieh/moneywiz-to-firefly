@@ -71,12 +71,7 @@ export interface Account {
   openingBalance: Big;
   currency: string;
   includeInNetworth: boolean;
-  group?: AccountGroup;
-}
-
-export interface AccountGroup {
-  id: number;
-  name: string;
+  groupName?: string;
 }
 
 export interface Tag {

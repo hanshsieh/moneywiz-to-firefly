@@ -328,8 +328,8 @@ class Migrate {
   }
   private toAccountName(account: moneywiz.Account): string {
     let accountName = account.name;
-    if (account.group) {
-      accountName = `${account.group.name} > ${accountName}`;
+    if (account.groupName) {
+      accountName = `${account.groupName} > ${accountName}`;
     }
     return accountName;
   }

@@ -12,12 +12,14 @@ import {
 import Big from 'big.js';
 import * as model from './model';
 import Objection from 'objection';
+import { AccountGroup } from './model';
 
 export interface Options {
   dbPath: string;
 }
-
+const ACCOUNT_GROUP_NAME = 'account_group_name';
 export class MoneyWizDbClient {
+  
   private knex: Knex;
   constructor(options: Options) {
     this.knex = createKnex({
@@ -71,13 +73,17 @@ export class MoneyWizDbClient {
     }
     const rawAccounts = await queryBuilder
       .select([
-        model.AccountCol.ID,
-        model.AccountCol.ACCOUNT_TYPE,
-        model.AccountCol.NAME,
-        model.AccountCol.OPENING_BALANCE,
-        model.AccountCol.CURRENCY_NAME,
-        model.AccountCol.INCLUDE_IN_NETWORTH,
-      ]);
+        `${model.Account.tableName}.${model.AccountCol.ID} AS ${model.AccountCol.ID}`,
+        `${model.Account.tableName}.${model.AccountCol.ACCOUNT_TYPE} AS ${model.AccountCol.ACCOUNT_TYPE}`,
+        `${model.Account.tableName}.${model.AccountCol.NAME} AS ${model.AccountCol.NAME}`,
+        `${model.Account.tableName}.${model.AccountCol.OPENING_BALANCE} AS ${model.AccountCol.OPENING_BALANCE}`,
+        `${model.Account.tableName}.${model.AccountCol.CURRENCY_NAME} AS ${model.AccountCol.CURRENCY_NAME}`,
+        `${model.Account.tableName}.${model.AccountCol.INCLUDE_IN_NETWORTH} AS ${model.AccountCol.INCLUDE_IN_NETWORTH}`,
+        `${model.AccountGroup.tableName}.${model.AccountGroupCol.NAME} AS ${ACCOUNT_GROUP_NAME}`,
+      ])
+      .leftOuterJoin(model.AccountGroup.tableName,
+        `${model.Account.tableName}.${model.AccountCol.GROUP_ID}`,
+        `${model.AccountGroup.tableName}.${model.AccountGroupCol.ID}`);
     return rawAccounts.map((rawAccount) => this.mapAccount(rawAccount));
   }
   private selectForAccountGroup(builder: Objection.AnyQueryBuilder) {
@@ -227,7 +233,7 @@ export class MoneyWizDbClient {
     }
     return result;
   }
-  private mapAccount(record: model.Account): Account {
+  private mapAccount(record: model.Account & {[ACCOUNT_GROUP_NAME]?: string}): Account {
     return {
       id: record[model.AccountCol.ID],
       name: record[model.AccountCol.NAME],
@@ -235,6 +241,7 @@ export class MoneyWizDbClient {
       openingBalance: new Big(record[model.AccountCol.OPENING_BALANCE]),
       currency: record[model.AccountCol.CURRENCY_NAME],
       includeInNetworth: record[model.AccountCol.INCLUDE_IN_NETWORTH],
+      groupName: record[ACCOUNT_GROUP_NAME] as string,
     };
   }
 }
