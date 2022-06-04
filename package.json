@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "build": "rimraf ./build && tsc -p ./tsconfig.json",
-    "eslint": "eslint src test --max-warnings 0 --ext .js,.jsx,.ts,.tsx"
+    "eslint": "eslint src test --max-warnings 0 --ext .js,.jsx,.ts,.tsx",
+    "migrate": "npx ts-node ./src/migrate"
   },
   "repository": {
     "type": "git",

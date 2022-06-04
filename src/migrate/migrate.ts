@@ -1,4 +1,3 @@
-import process from 'process';
 import config, { IConfig } from 'config';
 import ow from 'ow';
 import { FireflyClient } from '../firefly';
@@ -30,8 +29,8 @@ interface SplitInfo {
   amount: string;
   categoryName?: string;
 }
-const EMPTY = '(empty)';
-class Migrate {
+const EMPTY_PLACEHOLDER = '(none)';
+export class Migrate {
   private moneywizClient: MoneyWizDbClient;
   private fireflyClient: FireflyClient;
   private readonly fireflyAccounts: AccountRead[] = [];
@@ -72,7 +71,7 @@ class Migrate {
         break;
       }
       for (const account of accounts.data) {
-        console.info('Deleting account "%s"', account.attributes.name);
+        console.info('Deleting %s account "%s"', account.attributes.type, account.attributes.name);
         await this.fireflyClient.deleteAccount(account.id);
       }
     }
@@ -196,13 +195,13 @@ class Migrate {
       case moneywiz.TransactionType.DEPOSIT:
       case moneywiz.TransactionType.REFUND:
         transType = TransactionTypeProperty.Deposit;
-        sourceName = this.toNonEmptyStr(transaction.payee?.name);
+        sourceName = this.toRevenueAccountName(transaction.payee?.name);
         destinationName = this.toAccountName(transaction.account);
         break;
       case moneywiz.TransactionType.WITHDRAW:
         transType = TransactionTypeProperty.Withdrawal;
         sourceName = this.toAccountName(transaction.account),
-        destinationName = this.toNonEmptyStr(transaction.payee?.name);
+        destinationName = this.toExpenseAccountName(transaction.payee?.name);
         break;
       case moneywiz.TransactionType.TRANSFER_WITHDRAW:
         transType = TransactionTypeProperty.Transfer;
@@ -210,32 +209,26 @@ class Migrate {
           recipientAmount: ow.object,
           recipientAccount: ow.object,
         }));
+        ow(transaction.recipientAmount.cmp(0), 'amount', ow.number.greaterThan(0));
         foreignAmount = transaction.recipientAmount.abs().toFixed();
         foreignCurrencyCode = transaction.recipientAccount.currency;
         sourceName = this.toAccountName(transaction.account);
         destinationName = this.toAccountName(transaction.recipientAccount);
         break;
       case moneywiz.TransactionType.RECONCILE:
-        return undefined;
-        /*
-        transType = TransactionTypeProperty.Reconciliation;
-        const accountName = transaction.account.name;
-        const reconcileAccountName = this.toReconcileAccountName(accountName, transaction.account.currency);
-        const account = this.findFireflyAccountByName(accountName);
-        const reconcileAccount = this.findFireflyAccountByName(accountName);
-        if (!account || !reconcileAccount) {
-          throw new Error(`Failed to find account by name "${accountName}" and "${reconcileAccountName}"`);
-        }
-        // When creating a reconcilation transaction, we must use ID instead of name for the source
-        // and destination account.
+        // Currently, Firefly doesn't support creating reconciliation transaction with API
+        // so we convert it to withdrawal or deposit transaction.
+        // See https://github.com/firefly-iii/firefly-iii/discussions/6129
         if (transaction.amount.cmp(0) < 0) {
-          sourceId = account.id;
-          destinationId = reconcileAccount.id;
+          transType = TransactionTypeProperty.Withdrawal;
+          sourceName = this.toAccountName(transaction.account),
+          destinationName = this.getReconcileAccountName();
         } else {
-          sourceId = reconcileAccount.id;
-          destinationId = account.id;
+          transType = TransactionTypeProperty.Deposit;
+          sourceName = this.getReconcileAccountName();
+          destinationName = this.toAccountName(transaction.account);
         }
-        break;*/
+        break;
       case moneywiz.TransactionType.TRANSFER_DEPOSIT:
       case moneywiz.TransactionType.INVESTMENT_BUY:
       case moneywiz.TransactionType.INVESTMENT_SELL:
@@ -257,11 +250,23 @@ class Migrate {
       destinationName,
     };
   }
+  private toExpenseAccountName(name: string | undefined): string {
+    return this.toNonEmptyStr(name);
+  }
+  private toRefundAccountName(name: string | undefined): string {
+    return '(refund)';
+  }
+  private toRevenueAccountName(name: string | undefined): string {
+    return this.toNonEmptyStr(name);
+  }
+  private getReconcileAccountName(): string {
+    return '(reconciliation)';
+  }
   private toNonEmptyStr(str: string | undefined): string {
     if (str) {
       return str;
     }
-    return EMPTY;
+    return EMPTY_PLACEHOLDER;
   }
   private toSplitInfo(transaction: moneywiz.Transaction): SplitInfo[] {
     const result: SplitInfo[] = [];
@@ -419,17 +424,3 @@ class Migrate {
     await this.fireflyClient.close();
   }
 }
-
-async function main() {
-  const migrate = new Migrate();
-  try {
-    await migrate.run();
-  } finally {
-    await migrate.close();
-  }
-}
-
-main().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
-});
