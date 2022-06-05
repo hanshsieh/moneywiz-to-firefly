@@ -1,6 +1,7 @@
 import { Model } from 'objection';
 import { Account, AccountCol } from './account';
 import { CategoryAssignment, CategoryAssignmentCol } from './category-assignment';
+import { InvestmentHolding, InvestmentHoldingCol } from './investment-holding';
 import { Payee, PayeeCol } from './payee';
 import { Tag, TagCol } from './tag';
 import { TagTransactionLink, TagTransactionLinkCol } from './tag-transaction-link';
@@ -23,6 +24,8 @@ export enum TransactionCol {
   ORIGINAL_RECIPIENT_AMOUNT = 'originalRecipientAmount',
   ORIGINAL_SENDER_CURRENCY = 'originalSenderCurrency',
   ORIGINAL_SENDER_AMOUNT = 'originalSenderAmount',
+  NUMBER_OF_SHARES = 'numberOfShares',
+  INVESTMENT_HOLDING_ID = 'investmentHoldingId',
 }
 export enum TransactionRel {
   TAGS = 'tags',
@@ -33,6 +36,7 @@ export enum TransactionRel {
   RECIPIENT_TRANSACTION_INFO = 'recipientTransactionInfo',
   SENDER_TRANSACTION_INFO = 'senderTransactionInfo',
   CATEGORY_ASSIGNS = 'categoryAssigns',
+  INVESTMENT_HOLDING = 'investmentHolding',
 }
 export class Transaction extends Model {
   [TransactionCol.ID]!: number;
@@ -80,6 +84,7 @@ export class Transaction extends Model {
   [TransactionCol.ORIGINAL_RECIPIENT_AMOUNT]!: number;
   [TransactionCol.ORIGINAL_SENDER_CURRENCY]!: string;
   [TransactionCol.ORIGINAL_SENDER_AMOUNT]!: number;
+  [TransactionCol.NUMBER_OF_SHARES]!: number;
 
   [TransactionRel.TAGS]!: Tag[];
   [TransactionRel.PAYEE_INFO]!: Payee;
@@ -89,6 +94,7 @@ export class Transaction extends Model {
   [TransactionRel.CATEGORY_ASSIGNS]!: CategoryAssignment[];
   [TransactionRel.RECIPIENT_TRANSACTION_INFO]!: Transaction;
   [TransactionRel.SENDER_TRANSACTION_INFO]!: Transaction;
+  [TransactionRel.INVESTMENT_HOLDING]!: InvestmentHolding;
 
   static get tableName(): string {
     return 'Transactions';
@@ -164,6 +170,14 @@ export class Transaction extends Model {
         join: {
           from: `${Transaction.tableName}.${TransactionCol.ID}`,
           to: `${CategoryAssignment.tableName}.${CategoryAssignmentCol.TRANSACTION_ID}`,
+        }
+      },
+      [TransactionRel.INVESTMENT_HOLDING]: {
+        relation: Model.HasOneRelation,
+        modelClass: InvestmentHolding,
+        join: {
+          from: `${Transaction.tableName}.${TransactionCol.INVESTMENT_HOLDING_ID}`,
+          to: `${InvestmentHolding.tableName}.${InvestmentHoldingCol.ID}`,
         }
       },
     };

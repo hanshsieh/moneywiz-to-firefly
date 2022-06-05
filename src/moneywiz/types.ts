@@ -9,7 +9,7 @@ export interface GetAccountsOpts {
   limit?: number;
 }
 
-export interface GetCategoriessOpts {
+export interface GetCategoriesOpts {
   offset?: number;
   limit?: number;
 }
@@ -26,13 +26,8 @@ export enum TransactionType {
   INVESTMENT_EXCHANGE = 'InvestmentExchangeTransaction',
 }
 
-export interface Transaction {
-  id: number;
-  type: TransactionType;
+export interface Transaction extends BaseTransaction {
   date: Date;
-  amount: Big;
-  recipientAmount?: Big;
-  senderAmount?: Big;
   description: string;
   tags: Tag[];
   payee?: Payee;
@@ -42,9 +37,25 @@ export interface Transaction {
   categories: CategoryAssign[],
   recipientAccount?: Account;
   senderAccount?: Account;
+  recipientTransaction?: BaseTransaction;
+  senderTransaction?: BaseTransaction;
+}
+
+export interface InvestmentHolding {
+  id: number;
+  pricePerShare: Big;
+}
+
+export interface BaseTransaction {
+  id: number;
+  type: TransactionType;
+  amount: Big;
+  numberOfShares?: Big;
+  investmentHolding?: InvestmentHolding;
 }
 
 export interface CategoryAssign {
+  id: number;
   amount: Big;
   category: Category;
 }

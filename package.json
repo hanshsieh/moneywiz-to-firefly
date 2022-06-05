@@ -6,7 +6,9 @@
   "scripts": {
     "build": "rimraf ./build && tsc -p ./tsconfig.json",
     "eslint": "eslint src test --max-warnings 0 --ext .js,.jsx,.ts,.tsx",
-    "migrate": "npx ts-node ./src/migrate"
+    "migrate": "npx ts-node ./src/migrate",
+    "migrate:dev": "cross-env NODE_CONFIG_ENV=dev npm run migrate",
+    "migrate:production": "cross-env NODE_CONFIG_ENV=production npm run migrate"
   },
   "repository": {
     "type": "git",
@@ -33,6 +35,7 @@
     "big.js": "^6.1.1",
     "camelcase-keys": "^7.0.2",
     "config": "^3.3.7",
+    "cross-env": "^7.0.3",
     "got": "^11.8.5",
     "knex": "^2.1.0",
     "objection": "^3.0.1",

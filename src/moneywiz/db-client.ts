@@ -7,7 +7,9 @@ import {
   Account, 
   GetAccountsOpts,
   Category,
-  GetCategoriessOpts as GetCategoriesOpts
+  GetCategoriesOpts,
+  BaseTransaction,
+  InvestmentHolding,
 } from "./types";
 import Big from 'big.js';
 import * as model from './model';
@@ -99,12 +101,22 @@ export class MoneyWizDbClient {
       model.TransactionCol.DATE,
       model.TransactionCol.DESC,
       model.TransactionCol.NOTES,
+      model.TransactionCol.NUMBER_OF_SHARES,
     ];
     const opposingTranCols = [
+      model.TransactionCol.ID,
+      model.TransactionCol.TRANSACTION_TYPE,
       model.TransactionCol.AMOUNT,
+      model.TransactionCol.NUMBER_OF_SHARES,
     ];
     const accountGraph = {
       $modify: this.selectForAccount.name,
+    };
+    const opposingTransactionGraph = {
+      $modify: 'selectForTransaction',
+      [model.TransactionRel.INVESTMENT_HOLDING]: {
+        $modify: 'selectForInvestmentHolding',  
+      },
     };
     const queryBuilder = model.Transaction.query(this.knex)
       .select(transactionCols)
@@ -118,12 +130,8 @@ export class MoneyWizDbClient {
         [model.TransactionRel.ACCOUNT_INFO]: accountGraph,
         [model.TransactionRel.RECIPIENT_INFO]: accountGraph,
         [model.TransactionRel.SENDER_INFO]: accountGraph,
-        [model.TransactionRel.RECIPIENT_TRANSACTION_INFO]: {
-          $modify: 'selectForTransaction',
-        },
-        [model.TransactionRel.SENDER_TRANSACTION_INFO]: {
-          $modify: 'selectForTransaction',
-        },
+        [model.TransactionRel.RECIPIENT_TRANSACTION_INFO]: opposingTransactionGraph,
+        [model.TransactionRel.SENDER_TRANSACTION_INFO]: opposingTransactionGraph,
         [model.TransactionRel.CATEGORY_ASSIGNS]: {
           [model.CategoryAssignmentRel.CATEGORY_INFO]: {
             $modify: 'selectForCategory',
@@ -132,6 +140,9 @@ export class MoneyWizDbClient {
               $modify: 'selectForCategory',
             },
           },
+        },
+        [model.TransactionRel.INVESTMENT_HOLDING]: {
+          $modify: 'selectForInvestmentHolding',
         },
       }).modifiers({
         selectForTags(builder) {
@@ -154,6 +165,12 @@ export class MoneyWizDbClient {
         selectForTransaction(builder) {
           builder.select(opposingTranCols);
         },
+        selectForInvestmentHolding(builder) {
+          builder.select([
+            `${model.InvestmentHolding.tableName}.${model.InvestmentHoldingCol.ID}`,
+            `${model.InvestmentHolding.tableName}.${model.InvestmentHoldingCol.PRICE_PER_SHARE}`,
+          ]);
+        },
       });
     if (options.offset) {
       queryBuilder.offset(options.offset);
@@ -163,44 +180,69 @@ export class MoneyWizDbClient {
     }
     const rawTrans = await queryBuilder;
     return rawTrans.map((rawTran) => {
-      const payee = rawTran[model.TransactionRel.PAYEE_INFO];
-      const account = rawTran[model.TransactionRel.ACCOUNT_INFO];
-      const recipientAccount = rawTran[model.TransactionRel.RECIPIENT_INFO];
-      const senderAccount = rawTran[model.TransactionRel.SENDER_INFO];
-      const recipientTran = rawTran[model.TransactionRel.RECIPIENT_TRANSACTION_INFO];
-      const senderTran = rawTran[model.TransactionRel.SENDER_TRANSACTION_INFO];
-      let result: Transaction = {
-        id: rawTran[model.TransactionCol.ID],
-        type: rawTran[model.TransactionCol.TRANSACTION_TYPE] as TransactionType,
-        date: new Date(rawTran[model.TransactionCol.DATE]),
-        description: rawTran[model.TransactionCol.DESC] ?? '',
-        amount: new Big(rawTran[model.TransactionCol.AMOUNT]),
-        recipientAmount: recipientTran ? new Big(recipientTran[model.TransactionCol.AMOUNT]) : undefined,
-        senderAmount: senderTran ? new Big(senderTran[model.TransactionCol.AMOUNT]) : undefined,
-        tags: rawTran[model.TransactionRel.TAGS].map((tag) => ({
-          id: tag[model.TagCol.ID],
-          name: tag[model.TagCol.NAME],
-        })),
-        payee: payee ? {
-          id: payee[model.PayeeCol.ID],
-          name: payee[model.PayeeCol.NAME],
-        } : undefined,
-        account: this.mapAccount(account),
-        desc: rawTran[model.TransactionCol.DESC],
-        notes: rawTran[model.TransactionCol.NOTES],
-        categories: rawTran[model.TransactionRel.CATEGORY_ASSIGNS].map((c) => {
-          const category = c[model.CategoryAssignmentRel.CATEGORY_INFO];
-          const resultCat = {
-            amount: new Big(c[model.CategoryAssignmentCol.AMOUNT]),
-            category: this.mapCategory(category),
-          };
-          return resultCat;
-        }),
-        recipientAccount: recipientAccount ? this.mapAccount(recipientAccount) : undefined,
-        senderAccount: senderAccount ? this.mapAccount(senderAccount) : undefined,
-      };
-      return result;
+      return this.mapTransaction(rawTran);
     });
+  }
+  private mapTransaction(record: model.Transaction): Transaction {
+    const result = this.mapBaseTransaction(record);
+    const payee = record[model.TransactionRel.PAYEE_INFO];
+    const account = record[model.TransactionRel.ACCOUNT_INFO];
+    const recipientAccount = record[model.TransactionRel.RECIPIENT_INFO];
+    const senderAccount = record[model.TransactionRel.SENDER_INFO];
+    const recipientTran = record[model.TransactionRel.RECIPIENT_TRANSACTION_INFO];
+    const senderTran = record[model.TransactionRel.SENDER_TRANSACTION_INFO];
+    let recipientAmount: Big | undefined = undefined;
+    let recipientNumberOfShares: Big | undefined = undefined;
+    if (recipientTran) {
+      recipientAmount = recipientTran ? new Big(recipientTran[model.TransactionCol.AMOUNT]) : undefined;
+      recipientNumberOfShares = recipientTran ? new Big(recipientTran[model.TransactionCol.NUMBER_OF_SHARES]) : undefined;
+    }
+    return {
+      ...result,
+      date: new Date(record[model.TransactionCol.DATE]),
+      description: record[model.TransactionCol.DESC] ?? '',
+      recipientTransaction: recipientTran ? this.mapBaseTransaction(recipientTran) : undefined,
+      senderTransaction: senderTran ? this.mapBaseTransaction(senderTran) : undefined,
+      tags: record[model.TransactionRel.TAGS].map((tag) => ({
+        id: tag[model.TagCol.ID],
+        name: tag[model.TagCol.NAME],
+      })),
+      payee: payee ? {
+        id: payee[model.PayeeCol.ID],
+        name: payee[model.PayeeCol.NAME],
+      } : undefined,
+      account: this.mapAccount(account),
+      desc: record[model.TransactionCol.DESC],
+      notes: record[model.TransactionCol.NOTES],
+      categories: record[model.TransactionRel.CATEGORY_ASSIGNS].map((c) => {
+        const category = c[model.CategoryAssignmentRel.CATEGORY_INFO];
+        const resultCat = {
+          id: c[model.CategoryAssignmentCol.ID],
+          amount: new Big(c[model.CategoryAssignmentCol.AMOUNT]),
+          category: this.mapCategory(category),
+        };
+        return resultCat;
+      }),
+      recipientAccount: recipientAccount ? this.mapAccount(recipientAccount) : undefined,
+      senderAccount: senderAccount ? this.mapAccount(senderAccount) : undefined,
+    };
+  }
+  private mapBaseTransaction(rawTran: model.Transaction): BaseTransaction {
+    const numShares = rawTran[model.TransactionCol.NUMBER_OF_SHARES];
+    const investmentHolding = rawTran[model.TransactionRel.INVESTMENT_HOLDING];
+    return {
+      id: rawTran[model.TransactionCol.ID],
+      type: rawTran[model.TransactionCol.TRANSACTION_TYPE] as TransactionType,
+      amount: new Big(rawTran[model.TransactionCol.AMOUNT]),
+      numberOfShares: numShares ? new Big(numShares) : undefined,
+      investmentHolding: investmentHolding ? this.mapInvestmentHolding(investmentHolding) : undefined,
+    };
+  }
+  private mapInvestmentHolding(record: model.InvestmentHolding): InvestmentHolding {
+    return {
+      id: record[model.InvestmentHoldingCol.ID],
+      pricePerShare: new Big(record[model.InvestmentHoldingCol.PRICE_PER_SHARE]),
+    };
   }
   private mapCategory(record: model.Category): Category {
     const result: Category = {

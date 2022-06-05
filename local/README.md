@@ -25,16 +25,16 @@ Click `Create new token` under `Personal Access Token` to create a new token.
 Copy the token to your clipboard.  
 Copy the example config and inject your acces token.  
 ```bash
-cat config/local.ts.example | 
+cat config/local-dev.ts.example | 
   ACCESS_TOKEN='${ACCESS_TOKEN}' \
-  envsubst > config/local.ts
+  envsubst > config/local-dev.ts
 ```
-Put your Moneywiz SQLite database file at `moneywiz_db.db`. The path can be specified in `config/local.ts`.  
+Put your Moneywiz SQLite database file at `./moneywiz.db`. The path can be specified in config.  
 You can find the way to export your Moneywiz database file at the `Settings` page of your Moneywiz installation.  
 
 ## Start migration
 ```bash
-npm run migrate
+npm run migrate:dev
 ```
 
 ## Stop the servicee
