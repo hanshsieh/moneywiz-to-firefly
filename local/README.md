@@ -4,8 +4,14 @@ docker.
 It's only suitable for development purpose. Don't use it for production.  
 
 # Usage
-## Start the service
+
+## Install Dependencies
 Assume that the current directory is the repo's root directory.  
+```bash
+npm ci
+```
+
+## Start the service
 Run the service
 ```bash
 ./local/up.sh
