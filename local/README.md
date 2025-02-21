@@ -1,15 +1,9 @@
 # Introduction
-This directory contain the scripts that helps you setup a local instance of Firefly III with
+This directory contains the scripts that help you setup a local instance of Firefly III with
 docker.  
-It's only suitable for development purpose. Don't use it for production.  
+It's only suitable for development purposes. Don't use it for production.  
 
 # Usage
-
-## Install Dependencies
-Assume that the current directory is the repo's root directory.  
-```bash
-npm ci
-```
 
 ## Start the service
 Run the service
@@ -26,10 +20,10 @@ Open "http://localhost" with your browser.
 It will ask you to register the first account. Afterward, the registration form will be closed.  
 
 ## Setup config for migration
-After registrating an account, go to `Options -> Profile -> OAuth`.
+After registering an account, go to `Options -> Profile -> OAuth`.
 Click `Create new token` under `Personal Access Token` to create a new token.  
 Copy the token to your clipboard.  
-Copy the example config and inject your acces token.  
+Copy the example config and inject your access token.  
 ```bash
 cat config/local-dev.ts.example | 
   ACCESS_TOKEN='${ACCESS_TOKEN}' \
@@ -43,7 +37,7 @@ You can find the way to export your Moneywiz database file at the `Settings` pag
 npm run migrate:dev
 ```
 
-## Stop the servicee
+## Stop the service
 Stop the service and remove all the resources
 ```bash
 ./local/down.sh
