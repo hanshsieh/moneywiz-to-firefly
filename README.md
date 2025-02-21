@@ -54,6 +54,13 @@ Before using this tool, here's a list of operations that will and won't be done 
 Please star this repository if it helps you! :)
 
 # Usage
+## Prerequisites
+This tool is written in NodeJS. Please install 
+- nodejs >= 20  
+  To install it, you can follow the instructions at the [official site](https://nodejs.org/en/download).
+- Unix-based OS
+
+## Local Migration
 Before you actually do the migration, it's highly suggested that you do the migration to a local Firefly instance to
 check it everything works as expected.  
 See [here](./local/README.md) for the instructions for deploying a local Firefly instance.  
@@ -61,6 +68,7 @@ Here's a checklist that you might it helpful to see if the migration works as ex
 - Check the balanace of each assset account match what you see on Moneywiz. 
 - Check if the account numbers and names match.
 
+## Production Migration
 When you are ready to do the migration to the real Firefly instance, follow the same steps as migrating to the local Firefly instance,
 but use the following command to generate the config:
 ```bash
